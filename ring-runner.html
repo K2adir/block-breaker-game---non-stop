@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Block Breaker</title>
+    <style>
+      canvas {
+        border: 1px solid #fff;
+        background: #000;
+      }
+      body {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+        background: #222;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <script>
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+
+      // Preload assets
+      const assets = {
+        paddle: new Image(),
+        tiles: Array.from({ length: 6 }, (_, i) => new Image()),
+        extraBall: new Image(),
+        extraLife: new Image(),
+        death: new Image(),
+      };
+      assets.paddle.src = "/assets/bar.png";
+      assets.tiles.forEach(
+        (tile, i) => (tile.src = `/assets/tile${i + 1}.png`)
+      );
+      assets.extraBall.src = "/assets/extraball.png";
+      assets.extraLife.src = "/assets/life.png";
+      assets.death.src = "/assets/death-2.png";
+
+      // Wait for all images to load
+      let imagesLoaded = 0;
+      const totalImages = 9;
+      function checkAllLoaded() {
+        imagesLoaded++;
+        if (imagesLoaded === totalImages) startGame();
+      }
+      assets.paddle.onload = checkAllLoaded;
+      assets.tiles.forEach((tile) => (tile.onload = checkAllLoaded));
+      assets.extraBall.onload = checkAllLoaded;
+      assets.extraLife.onload = checkAllLoaded;
+      assets.death.onload = checkAllLoaded;
+
+      // Game objects
+      let paddle = { x: 375, y: 560, barCount: 1, speed: 4.8 }; // 6 * 0.8 (20% slower)
+      let ball = { x: 400, y: 550, radius: 5, dx: 2.72, dy: -2.72 }; // 3.4 * 0.8
+      let balls = [ball];
+      let bricks = [];
+      let powerUps = [];
+      let lives = 3;
+      let score = 0;
+      let gameOver = false;
+      let speedMultiplier = 1.0; // Tracks speed increases
+
+      // Input handling
+      let keys = { left: false, right: false };
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowLeft") keys.left = true;
+        if (e.key === "ArrowRight") keys.right = true;
+        if (e.key === "r" && gameOver) resetGame();
+      });
+      document.addEventListener("keyup", (e) => {
+        if (e.key === "ArrowLeft") keys.left = false;
+        if (e.key === "ArrowRight") keys.right = false;
+      });
+
+      // Generate random brick map
+      function generateBricks() {
+        bricks = [];
+        const tileSize = 50;
+        const cols = Math.floor(canvas.width / tileSize); // 16 cols
+        const rows = Math.floor((canvas.height - 100) / tileSize / 2); // 5 rows
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < cols; col++) {
+            if (Math.random() > 0.25) {
+              const tileIndex = Math.floor(Math.random() * 6);
+              bricks.push({
+                x: col * tileSize,
+                y: row * tileSize + 50,
+                width: tileSize,
+                height: tileSize,
+                tile: assets.tiles[tileIndex],
+              });
+            }
+          }
+        }
+      }
+
+      // Power-up/power-down logic
+      function spawnPowerUp(x, y) {
+        const rand = Math.random();
+        let type, image;
+        if (rand < 0.4) {
+          type = "extraBall";
+          image = assets.extraBall;
+        } else if (rand < 0.7) {
+          type = "widenPaddle";
+          image = assets.paddle;
+        } else if (rand < 0.85) {
+          type = "shrinkPaddle";
+          image = assets.paddle;
+        } else if (rand < 0.95) {
+          type = "extraLife";
+          image = assets.extraLife;
+        } else {
+          type = "death";
+          image = assets.death;
+        }
+        powerUps.push({ x, y, width: 50, height: 50, dy: 1.36, type, image }); // 1.7 * 0.8
+      }
+
+      function applyPowerUp(powerUp) {
+        const paddleWidth = paddle.barCount * assets.paddle.width;
+        if (powerUp.type === "extraBall") {
+          balls.push({
+            x: paddle.x + paddleWidth / 2,
+            y: 550,
+            radius: 5,
+            dx: 2.72 * speedMultiplier,
+            dy: -2.72 * speedMultiplier,
+          });
+        } else if (powerUp.type === "widenPaddle") {
+          paddle.barCount = Math.min(paddle.barCount + 1, 5);
+        } else if (powerUp.type === "shrinkPaddle") {
+          paddle.barCount = Math.max(paddle.barCount - 1, 1);
+        } else if (powerUp.type === "extraLife") {
+          lives++;
+        } else if (powerUp.type === "death") {
+          lives--;
+        }
+      }
+
+      // Game logic
+      function update() {
+        if (gameOver) return;
+
+        // Paddle movement
+        const paddleWidth = paddle.barCount * assets.paddle.width;
+        if (keys.left && paddle.x > 0)
+          paddle.x -= paddle.speed * speedMultiplier;
+        if (keys.right && paddle.x < canvas.width - paddleWidth)
+          paddle.x += paddle.speed * speedMultiplier;
+
+        // Ball movement and collision
+        balls.forEach((b, index) => {
+          b.x += b.dx * speedMultiplier;
+          b.y += b.dy * speedMultiplier;
+
+          if (b.x + b.radius > canvas.width || b.x - b.radius < 0) b.dx *= -1;
+          if (b.y - b.radius < 0) b.dy *= -1;
+          if (b.y + b.radius > canvas.height) balls.splice(index, 1);
+
+          if (
+            b.y + b.radius > paddle.y &&
+            b.y - b.radius < paddle.y + assets.paddle.height &&
+            b.x > paddle.x &&
+            b.x < paddle.x + paddleWidth
+          ) {
+            b.dy *= -1;
+          }
+
+          bricks.forEach((brick, i) => {
+            if (
+              b.y + b.radius > brick.y &&
+              b.y - b.radius < brick.y + brick.height &&
+              b.x > brick.x &&
+              b.x < brick.x + brick.width
+            ) {
+              b.dy *= -1;
+              bricks.splice(i, 1);
+              score += 10;
+              if (Math.random() < 0.2)
+                spawnPowerUp(brick.x + brick.width / 2, brick.y);
+            }
+          });
+        });
+
+        // Power-up movement and collection
+        powerUps.forEach((p, i) => {
+          p.y += p.dy * speedMultiplier;
+          if (p.y > canvas.height) powerUps.splice(i, 1);
+          if (
+            p.y + p.height > paddle.y &&
+            p.y < paddle.y + assets.paddle.height &&
+            p.x + p.width > paddle.x &&
+            p.x < paddle.x + paddleWidth
+          ) {
+            applyPowerUp(p);
+            powerUps.splice(i, 1);
+          }
+        });
+
+        // Check game state
+        if (balls.length === 0) {
+          lives--;
+          if (lives > 0)
+            balls.push({
+              x: paddle.x + paddleWidth / 2,
+              y: 550,
+              radius: 5,
+              dx: 2.72 * speedMultiplier,
+              dy: -2.72 * speedMultiplier,
+            });
+          else gameOver = true;
+        }
+        if (bricks.length === 0) {
+          speedMultiplier += 0.03; // 3% faster each level
+          generateBricks();
+        }
+      }
+
+      // Rendering
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Paddle (stacked bars)
+        for (let i = 0; i < paddle.barCount; i++) {
+          ctx.drawImage(
+            assets.paddle,
+            paddle.x + i * assets.paddle.width,
+            paddle.y
+          );
+        }
+
+        // Balls
+        ctx.fillStyle = "#fff";
+        balls.forEach((b) => {
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        // Bricks
+        bricks.forEach((b) =>
+          ctx.drawImage(b.tile, b.x, b.y, b.width, b.height)
+        );
+
+        // Power-ups
+        powerUps.forEach((p) =>
+          ctx.drawImage(p.image, p.x, p.y, p.width, p.height)
+        );
+
+        // HUD
+        ctx.fillStyle = "#fff";
+        ctx.font = "20px Arial";
+        ctx.fillText(`Lives: ${lives}  Score: ${score}`, 10, 30);
+
+        if (gameOver) {
+          ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = "#fff";
+          ctx.font = "40px Arial";
+          ctx.fillText("Game Over", 300, 300);
+          ctx.font = "20px Arial";
+          ctx.fillText("Press R to Restart", 340, 350);
+        }
+      }
+
+      function resetGame() {
+        paddle = { x: 375, y: 560, barCount: 1, speed: 4.8 };
+        balls = [{ x: 400, y: 550, radius: 5, dx: 2.72, dy: -2.72 }];
+        powerUps = [];
+        lives = 3;
+        score = 0;
+        gameOver = false;
+        speedMultiplier = 1.0; // Reset speed
+        generateBricks();
+      }
+
+      function startGame() {
+        generateBricks();
+        requestAnimationFrame(gameLoop);
+      }
+
+      function gameLoop() {
+        update();
+        draw();
+        requestAnimationFrame(gameLoop);
+      }
+    </script>
+  </body>
+</html>
