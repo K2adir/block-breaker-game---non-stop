@@ -146,6 +146,7 @@
           lives++;
         } else if (powerUp.type === "death") {
           lives--;
+          if (lives === 0) gameOver = true;
         }
       }
 
@@ -279,13 +280,11 @@
       }
 
       function startGame() {
-        console.log("Starting game");
         generateBricks();
         requestAnimationFrame(gameLoop);
       }
 
       function gameLoop() {
-        console.log("Game loop iteration");
         update();
         draw();
         requestAnimationFrame(gameLoop);
